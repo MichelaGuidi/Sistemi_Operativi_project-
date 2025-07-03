@@ -123,7 +123,7 @@ void* my_malloc(size_t size){
         }
     } else {
         //buddy allocator non ancora implementato
-        fprintf(stderr, "Richiesta di allocazione piccola, usare buddy allocator\n", size);
+        fprintf(stderr, "Richiesta di allocazione piccola, usare buddy allocator\n");
     }
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
