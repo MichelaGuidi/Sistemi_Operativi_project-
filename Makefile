@@ -25,11 +25,11 @@ $(TARGET_TEST): $(OBJS_TEST) $(OBJS_LIB)
 	$(CC) $(CFLAGS) $(OBJS_TEST) $(OBJS_LIB) -o $@
 
 #regola per compilare i file sorgenti della libreria
-$(OBJS_LIB): src/%.c 
+src/%.o: src/%.c 
 	$(CC) $(CFLAGS) -c $< -o $@
 
 #regola per compilare i file sorgenti dei test
-$(OBJS_TEST): tests/%.c 
+tests/%.o: tests/%.c 
 	$(CC) $(CFLAGS) -c $< -o $@
 
 #regola per rimuovere i file compilati

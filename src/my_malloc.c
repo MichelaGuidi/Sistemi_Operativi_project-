@@ -15,7 +15,7 @@ static pthread_mutex_t my_malloc_mutex = PTHREAD_MUTEX_INITIALIZER; // mutex glo
 static void init_mallloc_system(){
     //blocco il mutex per assicurare che l'inizializzazione avvenga una volta sola, anche se più
     //thread provano a chiamare my_malloc contemporaneamente
-    phtread_mutex_lock(&my_malloc_mutex);
+    pthread_mutex_lock(&my_malloc_mutex);
 
     if (PAGE_SIZE == 0){
         PAGE_SIZE = sysconf(_SC_PAGESIZE); //dimensione pagina di sistema
@@ -31,7 +31,8 @@ void* my_malloc(size_t size){
 
     init_mallloc_system(); //controllo se il sistema è inizializzato
 
-    phtread_mutex_lock(&my_malloc_mutex); //blocco il mutex
+    pthread_mutex_lock(&my_malloc_mutex); //blocco il mutex
+    (void)size; //cast per evitare warning
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
 
@@ -43,7 +44,8 @@ void my_free(void* ptr){
 
     init_mallloc_system(); //controllo che il sistema sia inizializzato
 
-    phtread_mutex_lock(&my_malloc_mutex); //blocco il mutex
+    pthread_mutex_lock(&my_malloc_mutex); //blocco il mutex
+    (void)ptr; //cast per evitare warning
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
 }
