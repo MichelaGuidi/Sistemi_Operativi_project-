@@ -4,6 +4,7 @@
 #include <sys/mman.h> // per mmap e munmap
 #include <stdio.h> //per perror
 #include <pthread.h> // per pthread_mutex_t
+#include <errno.h> //per perror
 
 // inizializzazione variabili globali
 static size_t PAGE_SIZE = 0; //dimensione della pagina di memoria (0 inizialmente per lazy init)
@@ -44,7 +45,7 @@ static void add_large_alloc(void* ptr, size_t size){
 
     if (new_node == MAP_FAILED){
         //l'allocazione non può essere tracciata
-        perror("Errore: fallita l'allocazione del nodo LargeAllocInfo");
+        perror("Errore: fallita l'allocazione del nodo LargeAllocInfo\n");
         return;
     }
 
@@ -88,7 +89,7 @@ static int remove_large_alloc(void* ptr, size_t* out_size){
     }
 
     if (munmap(current, sizeof(LargeAllocInfo)) == -1){
-        perror("Errore: fallita deallocazione della memoria occupata dal nodo");
+        perror("Errore: fallita deallocazione della memoria occupata dal nodo\n");
     }
 
     return 1;
@@ -99,21 +100,61 @@ void* my_malloc(size_t size){
 
     init_mallloc_system(); //controllo se il sistema è inizializzato
 
+    //caso di richiesta 0 byte
+    if (size == 0){
+        return NULL;
+    }
+
     pthread_mutex_lock(&my_malloc_mutex); //blocco il mutex
-    (void)size; //cast per evitare warning
+
+    void* ptr = NULL; //definizione puntatore che deve restituire la funzione
+
+    //decisione di quale allocatore usare in base alla dimensione
+    if (size >= MALLOC_TRESHOLD){
+        //caso grande, mmap viene usata direttamente
+        ptr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+
+        if (ptr == MAP_FAILED){
+            perror("Errore: fallimento durante la mappatura\n");
+            ptr = NULL;
+        } else {
+            //se ha successo, traccia l'allocazione
+            add_large_alloc(ptr, size);
+        }
+    } else {
+        //buddy allocator non ancora implementato
+        fprintf(stderr, "Richiesta di allocazione piccola, usare buddy allocator\n", size);
+    }
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
 
-    return NULL; // non alloco nulla per il momento, devo solo provare il codice
+    return ptr; // restituisco il puntatore
 }
 
 //implementazione della mia versione di free
 void my_free(void* ptr){
 
+    //caso in cui il puntatore sia null
+    if (ptr == NULL){
+        return;
+    }
+
     init_mallloc_system(); //controllo che il sistema sia inizializzato
 
     pthread_mutex_lock(&my_malloc_mutex); //blocco il mutex
-    (void)ptr; //cast per evitare warning
+
+    size_t freed_size; //variabile per memorizzare la dimensione del blocco liberato
+
+    //prova a rimuovere il puntatore dalle allocazioni grandi, altrimenti utilizza buddy allocator
+    if (remove_large_alloc(ptr, &freed_size)){
+        //se è stato trovato e rimosso, posso fare munmap
+        if (munmap(ptr, freed_size) == -1){
+            perror("Errore: fallimento durante munmap\n");
+        }
+    } else {
+        //buddy allocator non ancora implementato
+        fprintf(stderr, "puntatore %p non trovato tra le allocazioni grandi.\n", ptr);
+    }
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
 }
