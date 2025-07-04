@@ -13,6 +13,9 @@ static size_t MALLOC_TRESHOLD = 0; // soglia per decidere tra mmap e buddy alloc
 
 static pthread_mutex_t my_malloc_mutex = PTHREAD_MUTEX_INITIALIZER; // mutex globale per thread-safety
 
+//dichiarazione inizializzazione buddy allocator
+static void buddy_allocator_init();
+
 // funzione inizializzazione del sistema di allocazione
 static void init_mallloc_system(){
     //blocco il mutex per assicurare che l'inizializzazione avvenga una volta sola, anche se più
@@ -23,6 +26,7 @@ static void init_mallloc_system(){
         PAGE_SIZE = sysconf(_SC_PAGESIZE); //dimensione pagina di sistema
         MALLOC_TRESHOLD = PAGE_SIZE/4; //calcolo della soglia
 
+        buddy_allocator_init();
     }
     //sblocco il mutex
     pthread_mutex_unlock(&my_malloc_mutex);
@@ -180,6 +184,22 @@ static int get_idx_from_offset_and_level(size_t offset, int level){
     size_t block_num_at_level = offset/get_block_size_from_level(level);
 
     return ((1 << level) - 1) + block_num_at_level;
+}
+
+//Funzioni per allocazioni piccole
+//inizializzazione del buddy allocator
+static void buddy_allocator_init(){
+    //alloca 1MB di memoria per il pool del buddy allocator usando mmap
+    buddy_pool_start = (char*)mmap(NULL, BUDDY_POOL_SIZE, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    
+    if(buddy_pool_start == MAP_FAILED){
+        perror("Errore: fallita l'allocazione del pool del buddy allocator");
+        return;
+    }
+    //inizializza la bitmap a zero, perché completamente libero
+    memset(buddy_bitmap, 0, BITMAP_SIZE_BYTES);
+
+    printf("buddy allocator: pool inizializzato a %p, dimensione %u byte. Bitmap di %zu byte\n", buddy_pool_start, BUDDY_POOL_SIZE, BITMAP_SIZE_BYTES);
 }
 
 //implementazione della mia versione di malloc
