@@ -5,6 +5,7 @@
 #include <stdio.h> //per perror
 #include <pthread.h> // per pthread_mutex_t
 #include <errno.h> //per perror
+#include <math.h> //per log2
 
 // inizializzazione variabili globali
 static size_t PAGE_SIZE = 0; //dimensione della pagina di memoria (0 inizialmente per lazy init)
@@ -27,6 +28,7 @@ static void init_mallloc_system(){
     pthread_mutex_unlock(&my_malloc_mutex);
 }
 
+//ALLOCAZIONI GRANDI
 //struttura per memorizzare le informazioni in caso di allocazione grande
 typedef struct LargeAllocInfo{
     void* ptr; //puntatore all'inizio del blocco di memoria allocato con mmap
@@ -93,6 +95,91 @@ static int remove_large_alloc(void* ptr, size_t* out_size){
     }
 
     return 1;
+}
+
+//ALLOCAZIONI CON BUDDY ALLOCATOR
+//definizioni costanti
+#define BUDDY_POOL_SIZE (1024*1024) //dimensione totale del pool gestito dal buddy (1MB)
+#define MIN_BLOCK_SIZE 64 //dimensione minima allocabile dal buddy
+
+//definizione del numero di livelli nell'albero (livello 0: 1MB, livello MAX_LEVEL - 1: blocchi da MIN_BLOCK_SIZE)
+#define MAX_LEVEL 14 //(int)(log2(BUDDY_POOL_SIZE) - log2(MIN_BLOCK_SIZE))
+
+//definizione numero di nodi nell'albero binario (2^(MAX_LEVEL+1) - 1)
+#define TOTAL_NODES ((1 << (MAX_LEVEL + 1)) - 1)
+
+//dimensione della bitmap in byte
+#define BITMAP_SIZE_BYTES ((TOTAL_NODES / 8) + (TOTAL_NODES % 8 != 0 ? 1 : 0))
+
+static char* buddy_pool_start = NULL; //puntatore all'inizio del pool di memoria gestito dal buddy
+
+static unsigned char buddy_bitmap[BITMAP_SIZE_BYTES]; //bitmap che contiene i bit che indicano lo stato dei bloccchi
+
+//macro per la gestione dei bit della bitmap
+#define GET_BYTE(idx) (buddy_bitmap[(idx) / 8])
+#define GET_BIT_OFFSET(idx) ((idx) % 8)
+
+#define SET_BIT(idx) (GET_BYTE(idx) |= (1 << GET_BIT_OFFSET(idx)))
+#define CLEAR_BIT(idx) (GET_BYTE(idx) &= ~(1 << GET_BIT_OFFSET(idx)))
+#define IS_BIT_SET(idx) ((GET_BYTE(idx) >> GET_BIT_OFFSET(idx)) & 1)
+
+//funzioni per la navigazione dell'albero
+#define PARENT(idx) (((idx) - 1) / 2)
+#define LEFT_CHILD(idx) (2 * (idx) + 1)
+#define RIGHT_CHILD(idx) (2 * (idx) + 2)
+
+#define BUDDY(idx) (((idx) % 2 == 0) ? ((idx) - 1) : ((idx) + 1)) //indice del buddy di un nodo (se è sinistro restituisce il destro, altrimenti il sinistro)
+
+//funzioni èer conversioni buddy
+
+//calcola la dimensione del blocco di memoria corrispondente a un dato livello
+static size_t get_block_size_from_level(int level){
+    return BUDDY_POOL_SIZE >> level; //BUDDY_POOL_SIZE / (2^level)
+}
+
+//calcola il livello in cui si trova un blocco di una certa dimensione
+static int get_level_from_size(size_t size){
+    if (size < MIN_BLOCK_SIZE){
+        size = MIN_BLOCK_SIZE;
+    }
+
+    //trova la minima potenza di 2 maggiore o uguale a size
+    size_t actual_size = 1;
+    while(actual_size < size){
+        actual_size <<= 1;
+    }
+
+    //limita la dimensione al massimo del pool
+    if (actual_size > BUDDY_POOL_SIZE){
+        actual_size = BUDDY_POOL_SIZE;
+    }
+
+    //calcola il livello
+    int level = 0;
+    size_t temp_size = BUDDY_POOL_SIZE;
+    while (temp_size > actual_size && level < MAX_LEVEL){
+        temp_size >>= 1;
+        level++;
+    }
+    return level;
+}
+
+//calcola l'offset all'interno di buddy_pool_start
+//traduce l'indice logico nella sua posizione fisica nel pool di memoria
+static size_t get_offset_from_idx_and_level(int idx, int level){
+    //quanti blocchi di quel livello ci sono prima di idx
+    size_t block_num_at_level = idx - ((1 << level) - 1);
+
+    //l'offset è il numero di blocco per la dimensione di un blocco a quel livello
+    return block_num_at_level * get_block_size_from_level(level);
+}
+
+//funzione inversa della precedente
+static int get_idx_from_offset_and_level(size_t offset, int level){
+    //quanti blocchi di quel livello ci sono prima di offset
+    size_t block_num_at_level = offset/get_block_size_from_level(level);
+
+    return ((1 << level) - 1) + block_num_at_level;
 }
 
 //implementazione della mia versione di malloc
