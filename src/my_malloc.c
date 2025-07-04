@@ -6,6 +6,7 @@
 #include <pthread.h> // per pthread_mutex_t
 #include <errno.h> //per perror
 #include <math.h> //per log2
+#include <string.h> //per memset
 
 // inizializzazione variabili globali
 static size_t PAGE_SIZE = 0; //dimensione della pagina di memoria (0 inizialmente per lazy init)
@@ -200,6 +201,67 @@ static void buddy_allocator_init(){
     memset(buddy_bitmap, 0, BITMAP_SIZE_BYTES);
 
     printf("buddy allocator: pool inizializzato a %p, dimensione %u byte. Bitmap di %zu byte\n", buddy_pool_start, BUDDY_POOL_SIZE, BITMAP_SIZE_BYTES);
+}
+
+//funzione che alloca un blocco di memoria dal pool del buddy allocator
+static void* buddy_alloc(size_t size){
+    //alloco uno spazio all'inizio del blocco per memorizzare la sua dimensione
+    size_t required_size_with_header = size + sizeof(size_t);
+
+    //controllo se la richiesta è troppo grande
+    if (required_size_with_header > BUDDY_POOL_SIZE){
+        return NULL;
+    }
+
+    //determino il livello dell'albero buddy che può ospitare la dimensione richiesta
+    int target_level = get_level_from_size(required_size_with_header);
+
+    int found_idx = -1;
+    int actual_level = -1;
+
+    //scorre i livelli dell'albero dal più grande al livello target
+    for (int current_level = 0; current_level <= MAX_LEVEL; ++current_level){
+        //calcola l'indice di partenza e il numero di nodi per il livello corrente
+        size_t level_start_idx = (1 << current_level) - 1;
+        size_t num_nodes_at_level = (1 << current_level);
+
+        for (size_t i = 0; i < num_nodes_at_level; ++i){
+            int idx = level_start_idx + i;
+            
+            //se il bit non è impostato il blocco è libero
+            if (!IS_BIT_SET(idx)){
+                //controllo se la dimensione del blocco è sufficiente
+                if (get_block_size_from_level(current_level) >= required_size_with_header){
+                    found_idx = idx; //trovato un blocco adatto
+                    actual_level = current_level; //registro il livello
+
+                    goto found_block; //esco dal ciclo una volta trovato
+                }
+            }
+        }
+    }
+    found_block:
+    //se non è stato trovato un blocco adatto, restituisco null
+        if (found_idx == -1){
+            return NULL;
+        }
+        //se il blocco è troppo grande, viene diviso ricorsivamente fino alla dimensione necessaria
+        while(actual_level < target_level){
+            //indico che non è più libero
+            SET_BIT(found_idx);
+            //passa al figlio sinistro
+            found_idx = LEFT_CHILD(found_idx);
+            actual_level++; //scendo di livello
+        }
+
+        //indico il blocco come occupato
+        SET_BIT(found_idx);
+        //calcolo l'indirizzo di memoria all'interno del pool
+        char* actual_block_start = buddy_pool_start + get_offset_from_idx_and_level(found_idx, actual_level);
+        //memorizzo la dimensione allocata
+        *(size_t*) actual_block_start = required_size_with_header;
+        //restituisco il puntatore(dopo l'intestazione)
+        return (void*)(actual_block_start + sizeof(size_t));
 }
 
 //implementazione della mia versione di malloc
