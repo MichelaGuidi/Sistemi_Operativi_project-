@@ -200,7 +200,7 @@ static void buddy_allocator_init(){
     //inizializza la bitmap a zero, perché completamente libero
     memset(buddy_bitmap, 0, BITMAP_SIZE_BYTES);
 
-    printf("buddy allocator: pool inizializzato a %p, dimensione %u byte. Bitmap di %zu byte\n", buddy_pool_start, BUDDY_POOL_SIZE, BITMAP_SIZE_BYTES);
+    //printf("buddy allocator: pool inizializzato a %p, dimensione %u byte. Bitmap di %zu byte\n", buddy_pool_start, BUDDY_POOL_SIZE, BITMAP_SIZE_BYTES);
 }
 
 //funzione che alloca un blocco di memoria dal pool del buddy allocator
@@ -264,6 +264,46 @@ static void* buddy_alloc(size_t size){
         return (void*)(actual_block_start + sizeof(size_t));
 }
 
+//implementazione del buddy_free
+//libera un blocco di memoria precedentemente allocato dal pool del buddy allocator
+static void buddy_free(void* ptr){
+    //puntatore all'inizio del blocco allocato
+    char* original_alloc_ptr = (char*)ptr - sizeof(size_t);
+    //dimensione originale del blocco (inclusa intestazione)
+    size_t allocated_size = *(size_t*) original_alloc_ptr;
+    //calcolo l'offset del blocco all'interno del pool di memoria
+    size_t offset = (size_t)(original_alloc_ptr - buddy_pool_start);
+    //livello originale del blocco in base alla dimensione
+    int level = get_level_from_size(allocated_size);
+    //indice del nodo corrispondente nella bitmap
+    int idx = get_idx_from_offset_and_level(offset, level);
+
+    CLEAR_BIT(idx); //libero il blocco, imposto bit a 0
+    
+    //ciclo che tenta di unire il blocco liberato con il suo buddy
+    while(level > 0){
+        int buddy_idx = BUDDY(idx); //indice del blocco buddy
+
+        //controllo se il buddy è fuori dai limiti dell'albero
+        if (buddy_idx < 0 || buddy_idx >= TOTAL_NODES){
+            break;
+        }
+
+        //se il buddy è occupato, esco dal ciclo
+        if (IS_BIT_SET(buddy_idx)){
+            break;
+        }
+
+        CLEAR_BIT(buddy_idx); //il suo bit viene azzerato, perche non è più un'entità libera
+
+        idx = PARENT(idx); 
+
+        CLEAR_BIT(idx); // anche il genitore diventa libero
+
+        level--;
+    }
+}
+
 //implementazione della mia versione di malloc
 void* my_malloc(size_t size){
 
@@ -291,8 +331,10 @@ void* my_malloc(size_t size){
             add_large_alloc(ptr, size);
         }
     } else {
-        //buddy allocator non ancora implementato
-        fprintf(stderr, "Richiesta di allocazione piccola, usare buddy allocator\n");
+        ptr = buddy_alloc(size);
+        if (ptr == NULL){
+            fprintf(stderr, "Errore: non è stato possibile usare il buddy allocator\n");
+        }
     }
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
@@ -321,8 +363,14 @@ void my_free(void* ptr){
             perror("Errore: fallimento durante munmap\n");
         }
     } else {
-        //buddy allocator non ancora implementato
-        fprintf(stderr, "puntatore %p non trovato tra le allocazioni grandi.\n", ptr);
+        char* original_alloc_ptr = (char*)ptr - sizeof(size_t);
+        //controllo se il puntatore rientra nel range del pool di buddy allocator
+        if (buddy_pool_start != NULL && original_alloc_ptr >= buddy_pool_start && original_alloc_ptr < buddy_pool_start + BUDDY_POOL_SIZE){
+            buddy_free(ptr);
+        } else {
+            //se il puntatore non è stato trovato in nessuno dei due casi, allora non è gestito
+            fprintf(stderr, "Tentativo di liberare un puntatore non gestito o già liberato: %p\n", ptr);
+        }
     }
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
