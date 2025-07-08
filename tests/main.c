@@ -32,13 +32,7 @@ int main(){
     printf("   my_malloc(1025) -> %p\n", p5_threshold_plus_1);
     //print_large_alloc_list();
 
-    // Scrivi e leggi da qualche byte per verificare la validità della memoria
-    if (p1_small) memset(p1_small, 0xAA, 10);
-    if (p2_large) memset(p2_large, 0xBB, 100);
-    if (p3_min_buddy) memset(p3_min_buddy, 0xCC, 1);
-    if (p4_threshold_minus_1) memset(p4_threshold_minus_1, 0xDD, 10);
-    if (p5_threshold_plus_1) memset(p5_threshold_plus_1, 0xEE, 100);
-    printf("   Scrittura su blocchi allocati completata.\n");
+    //BuddyAllocator_print_pool();
 
     // Libera i blocchi
     my_free(p1_small);
@@ -47,6 +41,7 @@ int main(){
     my_free(p4_threshold_minus_1);
     my_free(p5_threshold_plus_1);
     printf("   Deallocazioni semplici completate.\n\n");
+    //BuddyAllocator_print_pool();
 
 
     // --- Test 2: Allocazione per Riempire Parzialmente il Buddy Pool ---

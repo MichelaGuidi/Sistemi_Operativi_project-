@@ -192,7 +192,7 @@ static int get_idx_from_offset_and_level(size_t offset, int level){
 static void BuddyAllocator_init(){
     //alloca 1MB di memoria per il pool del buddy allocator usando mmap
     buddy_pool_start = (char*)mmap(NULL, BUDDY_POOL_SIZE, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-    
+    //printf("pool inizializzato a %p\n", buddy_pool_start);
     if(buddy_pool_start == MAP_FAILED){
         perror("Errore: fallita l'allocazione del pool del buddy allocator");
         return;
@@ -258,7 +258,7 @@ static void* BuddyAllocator_malloc(size_t size){
         SET_BIT(found_idx);
         //calcolo l'indirizzo di memoria all'interno del pool
         char* actual_block_start = buddy_pool_start + get_offset_from_idx_and_level(found_idx, actual_level);
-        //memorizzo la dimensione allocata
+        //memorizzo la dimensione allocata (scrivo dentro il blocco per occuparlo)
         *(size_t*) actual_block_start = required_size_with_header;
         //restituisco il puntatore(dopo l'intestazione)
         return (void*)(actual_block_start + sizeof(size_t));
@@ -401,4 +401,39 @@ void BuddyAllocator_print_bitmap(){
         if ((i + 1) % 64 == 0) printf("\n");
     }
     printf("\n");
+}
+
+void BuddyAllocator_print_pool(){
+    pthread_mutex_lock(&my_malloc_mutex);
+
+    if (buddy_pool_start == NULL){
+        printf("Buddy Allocator Pool non inizializzato\n");
+        pthread_mutex_unlock(&my_malloc_mutex);
+        return;
+    }
+    for (int order = 0; order <= MAX_LEVEL; ++order){
+        size_t level_start_idx = (1 << order) - 1;
+        size_t num_nodes_at_level = (1<<order);
+
+        for (size_t i = 0; i < num_nodes_at_level; ++i){
+            int idx = level_start_idx + i;
+
+            if (idx >= TOTAL_NODES){
+                break;
+            }
+
+            if (IS_BIT_SET(idx)){
+                printf("O");
+            } else {
+                printf("L");
+            }
+
+            if((i+1)%4 == 0){
+                printf(" ");
+            }
+        }
+        printf("\n");
+    }
+    printf("----------------------------------");
+    pthread_mutex_unlock(&my_malloc_mutex);
 }
