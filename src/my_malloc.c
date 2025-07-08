@@ -15,7 +15,7 @@ static size_t MALLOC_TRESHOLD = 0; // soglia per decidere tra mmap e buddy alloc
 static pthread_mutex_t my_malloc_mutex = PTHREAD_MUTEX_INITIALIZER; // mutex globale per thread-safety
 
 //dichiarazione inizializzazione buddy allocator
-static void buddy_allocator_init();
+static void BuddyAllocator_init();
 
 // funzione inizializzazione del sistema di allocazione
 static void init_mallloc_system(){
@@ -27,7 +27,7 @@ static void init_mallloc_system(){
         PAGE_SIZE = sysconf(_SC_PAGESIZE); //dimensione pagina di sistema
         MALLOC_TRESHOLD = PAGE_SIZE/4; //calcolo della soglia
 
-        buddy_allocator_init();
+        BuddyAllocator_init();
     }
     //sblocco il mutex
     pthread_mutex_unlock(&my_malloc_mutex);
@@ -121,12 +121,12 @@ static char* buddy_pool_start = NULL; //puntatore all'inizio del pool di memoria
 static unsigned char buddy_bitmap[BITMAP_SIZE_BYTES]; //bitmap che contiene i bit che indicano lo stato dei bloccchi
 
 //macro per la gestione dei bit della bitmap
-#define GET_BYTE(idx) (buddy_bitmap[(idx) / 8])
-#define GET_BIT_OFFSET(idx) ((idx) % 8)
+#define GET_BYTE(idx) (buddy_bitmap[(idx) / 8]) //prende il byte in cui si trova il bit all'idx
+#define GET_BIT_OFFSET(idx) ((idx) % 8) //calcola la posizione del bit all'interno del byte
 
-#define SET_BIT(idx) (GET_BYTE(idx) |= (1 << GET_BIT_OFFSET(idx)))
-#define CLEAR_BIT(idx) (GET_BYTE(idx) &= ~(1 << GET_BIT_OFFSET(idx)))
-#define IS_BIT_SET(idx) ((GET_BYTE(idx) >> GET_BIT_OFFSET(idx)) & 1)
+#define SET_BIT(idx) (GET_BYTE(idx) |= (1 << GET_BIT_OFFSET(idx))) //imposta il bit di idx a 1
+#define CLEAR_BIT(idx) (GET_BYTE(idx) &= ~(1 << GET_BIT_OFFSET(idx))) //azzera il bit
+#define IS_BIT_SET(idx) ((GET_BYTE(idx) >> GET_BIT_OFFSET(idx)) & 1) //controlla se il bit è 1 o 0
 
 //funzioni per la navigazione dell'albero
 #define PARENT(idx) (((idx) - 1) / 2)
@@ -173,7 +173,7 @@ static int get_level_from_size(size_t size){
 //traduce l'indice logico nella sua posizione fisica nel pool di memoria
 static size_t get_offset_from_idx_and_level(int idx, int level){
     //quanti blocchi di quel livello ci sono prima di idx
-    size_t block_num_at_level = idx - ((1 << level) - 1);
+    size_t block_num_at_level = idx - ((1 << level) - 1); //1<<level = sposta 1 di level posizioni (2^level)
 
     //l'offset è il numero di blocco per la dimensione di un blocco a quel livello
     return block_num_at_level * get_block_size_from_level(level);
@@ -189,7 +189,7 @@ static int get_idx_from_offset_and_level(size_t offset, int level){
 
 //Funzioni per allocazioni piccole
 //inizializzazione del buddy allocator
-static void buddy_allocator_init(){
+static void BuddyAllocator_init(){
     //alloca 1MB di memoria per il pool del buddy allocator usando mmap
     buddy_pool_start = (char*)mmap(NULL, BUDDY_POOL_SIZE, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     
@@ -204,7 +204,7 @@ static void buddy_allocator_init(){
 }
 
 //funzione che alloca un blocco di memoria dal pool del buddy allocator
-static void* buddy_alloc(size_t size){
+static void* BuddyAllocator_malloc(size_t size){
     //alloco uno spazio all'inizio del blocco per memorizzare la sua dimensione
     size_t required_size_with_header = size + sizeof(size_t);
 
@@ -266,7 +266,7 @@ static void* buddy_alloc(size_t size){
 
 //implementazione del buddy_free
 //libera un blocco di memoria precedentemente allocato dal pool del buddy allocator
-static void buddy_free(void* ptr){
+static void BuddyAllocator_free(void* ptr){
     //puntatore all'inizio del blocco allocato
     char* original_alloc_ptr = (char*)ptr - sizeof(size_t);
     //dimensione originale del blocco (inclusa intestazione)
@@ -331,7 +331,7 @@ void* my_malloc(size_t size){
             add_large_alloc(ptr, size);
         }
     } else {
-        ptr = buddy_alloc(size);
+        ptr = BuddyAllocator_malloc(size);
         if (ptr == NULL){
             fprintf(stderr, "Errore: non è stato possibile usare il buddy allocator\n");
         }
@@ -366,7 +366,7 @@ void my_free(void* ptr){
         char* original_alloc_ptr = (char*)ptr - sizeof(size_t);
         //controllo se il puntatore rientra nel range del pool di buddy allocator
         if (buddy_pool_start != NULL && original_alloc_ptr >= buddy_pool_start && original_alloc_ptr < buddy_pool_start + BUDDY_POOL_SIZE){
-            buddy_free(ptr);
+            BuddyAllocator_free(ptr);
         } else {
             //se il puntatore non è stato trovato in nessuno dei due casi, allora non è gestito
             fprintf(stderr, "Tentativo di liberare un puntatore non gestito o già liberato: %p\n", ptr);
@@ -374,4 +374,31 @@ void my_free(void* ptr){
     }
 
     pthread_mutex_unlock(&my_malloc_mutex); //sblocco il mutex
+}
+
+//funzione di debug per stampare la lista delle allocazioni grandi
+void print_large_alloc_list(){
+    LargeAllocInfo* current = large_allocs_head;
+    printf("Stato della lista di allocazioni grandi:\n");
+
+    if(!current){
+        printf(" lista vuota \n");
+        return;
+    }
+    int i = 0;
+    while(current){
+        printf("[%d] indirizzo: %p, size: %zu bytes\n", i, current->ptr, current->size);
+        current = current->next;
+        i++;
+    }
+}
+
+//funzione di debug per stampare lo stato della bitmap del buddy allocator
+void BuddyAllocator_print_bitmap(){
+    printf("Stato Buddy bitmap: \n");
+    for (int i = 0; i < TOTAL_NODES; ++i){
+        printf("%d", IS_BIT_SET(i));
+        if ((i + 1) % 64 == 0) printf("\n");
+    }
+    printf("\n");
 }
