@@ -44,7 +44,7 @@ Questa funzione rimuove una grande allocazione dalla lista
 Inizializza il BuddyAllocator con l'uso di mmap per il pool di memoria, e memset per impostare la bitmap a 0.
 
 #### 'static void* BuddyAllocator_malloc(size_t size)'
-Funzione che alloca un blocco di memoria scegliendo tra quelli liberi. Se il blocco è troppo grande lo divide, scendendo per il figlio sinistro e impostando il bit del padre a 1. Una volta trovato imposta il suo bit a 1 e restituisce il puntatore al blocco.
+Funzione che occupa un blocco di memoria scegliendo tra quelli liberi. Se il blocco è troppo grande lo divide, scendendo per il figlio sinistro e impostando il bit del padre a 1. Una volta trovato imposta il suo bit a 1 e restituisce il puntatore al blocco.
 
 #### 'static void BuddyAllocator_free(void* ptr)'
 Dato il suo puntatore, trova il blocco da liberare e imposta il suo bit a 0. Comincia poi un ciclo per vedere se il suo buddy è libero, così da poterli unire eventualmente. Il ciclo continua finché non trova un buddy occupato.
