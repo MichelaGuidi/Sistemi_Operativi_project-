@@ -26,6 +26,8 @@ int main(){
     void *p5_threshold_plus_1 = my_malloc(MALLOC_THRESHOLD_FOR_TESTS + 1); // Dovrebbe usare Mmap (es. 1025 byte)
 
     printf("   my_malloc(100)  -> %p\n", p1_small);
+    //strcpy(p1_small, "CIAO!"); //tentativo di scrittura sul pool: OK
+    //dump_pool(1024);
     printf("   my_malloc(20000) -> %p\n", p2_large);
     printf("   my_malloc(1)    -> %p\n", p3_min_buddy);
     printf("   my_malloc(1023) -> %p\n", p4_threshold_minus_1);
@@ -60,6 +62,7 @@ int main(){
     }
     printf("   Allocati %d blocchi piccoli nel buddy pool.\n", buddy_count);
     //BuddyAllocator_print_bitmap();
+    //BuddyAllocator_print_pool();
 
     // Libera i blocchi nell'ordine di allocazione, per facilitare la coalescenza
     for (int i = 0; i < buddy_count; ++i) {
@@ -68,6 +71,8 @@ int main(){
         }
     }
     printf("   Deallocati blocchi piccoli\n\n");
+    //BuddyAllocator_print_bitmap();
+    //BuddyAllocator_print_pool();
 
 
     // --- Test 3: Stress Test con Allocazioni e Deallocazioni Casuali ---

@@ -26,6 +26,7 @@ static void init_mallloc_system(){
     if (PAGE_SIZE == 0){
         PAGE_SIZE = sysconf(_SC_PAGESIZE); //dimensione pagina di sistema
         MALLOC_TRESHOLD = PAGE_SIZE/4; //calcolo della soglia
+        printf("PAGE_SIZE: %zu, MALLOC_TRESHOLD: %zu\n", PAGE_SIZE, MALLOC_TRESHOLD);
 
         BuddyAllocator_init();
     }
@@ -436,4 +437,17 @@ void BuddyAllocator_print_pool(){
     }
     printf("----------------------------------");
     pthread_mutex_unlock(&my_malloc_mutex);
+}
+
+//funzione che stampa i primi num_bytes del pool
+void dump_pool(size_t num_bytes){
+    printf("contentuto del pool (primi %zu byte)\n", num_bytes);
+    for (size_t i = 0; i < num_bytes; ++i){
+        unsigned char byte = buddy_pool_start[i];
+        if (byte >= 32 && byte <= 126)
+            printf("'%c' ", byte);
+        else
+            printf("%02X ", byte);
+        if ((i+1)%16 == 0) printf("\n");
+    }
 }

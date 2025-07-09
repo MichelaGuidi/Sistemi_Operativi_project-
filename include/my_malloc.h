@@ -9,6 +9,7 @@ void my_free(void* ptr);
 void print_large_alloc_list();
 void BuddyAllocator_print_bitmap();
 void BuddyAllocator_print_pool();
+void dump_pool(size_t num_bytes);
 
 #endif //MY_MALLOC_H
 
