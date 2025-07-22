@@ -7,6 +7,7 @@
 #include <errno.h> //per perror
 #include <math.h> //per log2
 #include <string.h> //per memset
+#include <stdlib.h> //per malloc
 
 // inizializzazione variabili globali
 static size_t PAGE_SIZE = 0; //dimensione della pagina di memoria (0 inizialmente per lazy init)
@@ -46,28 +47,35 @@ typedef struct LargeAllocInfo{
 static LargeAllocInfo* large_allocs_head = NULL;
 
 // funzione che aggiunge un'allocazione grande alla lista
-static void add_large_alloc(void* ptr, size_t size){
+static void* add_large_alloc(size_t size){
 
+    //void* ptr = NULL;
     //alloca la struttura usando mmap
-    LargeAllocInfo* new_node = (LargeAllocInfo*)mmap(NULL, sizeof(LargeAllocInfo), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    void* ptr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    if (ptr == MAP_FAILED){
+        perror("Errore: fallita l'allocazione del blocco di memoria\n");
+        return NULL;
+    } else {
+        LargeAllocInfo* new_node = (LargeAllocInfo*)malloc(sizeof(LargeAllocInfo));
+        if (new_node == NULL){
+            perror("Errore: fallita l'allocazione di un nodo\n");
+            munmap(ptr, size);
+            return NULL;
+        }
 
-    if (new_node == MAP_FAILED){
-        //l'allocazione non può essere tracciata
-        perror("Errore: fallita l'allocazione del nodo LargeAllocInfo\n");
-        return;
+        //inserisce le informazioni nel nuovo nodo
+        new_node->ptr = ptr;
+        new_node->size = size;
+
+        //il nuovo nodo si trova all'inizio della lista
+        new_node->next = large_allocs_head;
+        large_allocs_head = new_node;
     }
-
-    //inserisce le informazioni nel nuovo nodo
-    new_node->ptr = ptr;
-    new_node->size = size;
-
-    //il nuovo nodo si trova all'inizio della lista
-    new_node->next = large_allocs_head;
-    large_allocs_head = new_node;
+    return ptr;
 }
 
 //funzione per la rimozione di un'allocazione grande dalla lista
-static int remove_large_alloc(void* ptr, size_t* out_size){
+static int remove_large_alloc(void* ptr){
     LargeAllocInfo* current = large_allocs_head;
     LargeAllocInfo* prev = NULL;
 
@@ -90,15 +98,13 @@ static int remove_large_alloc(void* ptr, size_t* out_size){
         //il nodo è in mezzo o a fine lista
         prev->next = current->next;
     }
-
-    //dimensione originale del blocco
-    if (out_size != NULL){
-        *out_size = current->size;
+    size_t out_size = current->size;
+    
+    if (munmap(current->ptr, out_size) == -1){
+        perror("Errore: fallita la deallocazione del blocco\n");
     }
 
-    if (munmap(current, sizeof(LargeAllocInfo)) == -1){
-        perror("Errore: fallita deallocazione della memoria occupata dal nodo\n");
-    }
+    free(current);
 
     return 1;
 }
@@ -321,16 +327,7 @@ void* my_malloc(size_t size){
 
     //decisione di quale allocatore usare in base alla dimensione
     if (size >= MALLOC_TRESHOLD){
-        //caso grande, mmap viene usata direttamente
-        ptr = mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-
-        if (ptr == MAP_FAILED){
-            perror("Errore: fallimento durante la mappatura\n");
-            ptr = NULL;
-        } else {
-            //se ha successo, traccia l'allocazione
-            add_large_alloc(ptr, size);
-        }
+        ptr = add_large_alloc(size);
     } else {
         ptr = BuddyAllocator_malloc(size);
         if (ptr == NULL){
@@ -355,14 +352,9 @@ void my_free(void* ptr){
 
     pthread_mutex_lock(&my_malloc_mutex); //blocco il mutex
 
-    size_t freed_size; //variabile per memorizzare la dimensione del blocco liberato
-
     //prova a rimuovere il puntatore dalle allocazioni grandi, altrimenti utilizza buddy allocator
-    if (remove_large_alloc(ptr, &freed_size)){
-        //se è stato trovato e rimosso, posso fare munmap
-        if (munmap(ptr, freed_size) == -1){
-            perror("Errore: fallimento durante munmap\n");
-        }
+    if (remove_large_alloc(ptr) == 1){
+        printf("Deallocazione grande effettuata\n");
     } else {
         char* original_alloc_ptr = (char*)ptr - sizeof(size_t);
         //controllo se il puntatore rientra nel range del pool di buddy allocator
@@ -403,6 +395,7 @@ void BuddyAllocator_print_bitmap(){
     }
     printf("\n");
 }
+
 
 void BuddyAllocator_print_pool(){
     pthread_mutex_lock(&my_malloc_mutex);
@@ -445,9 +438,123 @@ void dump_pool(size_t num_bytes){
     for (size_t i = 0; i < num_bytes; ++i){
         unsigned char byte = buddy_pool_start[i];
         if (byte >= 32 && byte <= 126)
-            printf("'%c' ", byte);
+            printf("%c ", byte);
         else
             printf("%02X ", byte);
         if ((i+1)%16 == 0) printf("\n");
     }
 }
+
+//funzione che trova l'allocazione grande
+static LargeAllocInfo* find_large_alloc(void* ptr){
+    LargeAllocInfo* current = large_allocs_head;
+    while(current != NULL){
+        if (current->ptr == ptr){
+            return current;
+        }
+        current = current->next;
+    }
+    return NULL;
+}
+
+//funzione che scrive nel blocco di memoria allocato
+//I parametri sono: ptr (puntatore al blocco), offset(indice da cui indicare a scrivere), 
+//data (puntatore ai dati da scrivere), data_size (dimensione)
+int my_write_large_alloc(void* ptr, size_t offset, const void* data, size_t data_size){
+    if (ptr == NULL || data == NULL || data_size == 0){
+        fprintf(stderr, "Errore: parametri non validi\n");
+        return 0;
+    }
+    pthread_mutex_lock(&my_malloc_mutex);
+
+    LargeAllocInfo* node = find_large_alloc(ptr);
+    if (node == NULL){
+        fprintf(stderr, "Errore: puntatore non trovato\n");
+        pthread_mutex_unlock(&my_malloc_mutex);
+        return 0;
+    }
+
+    if (offset + data_size > node->size){
+        fprintf(stderr, "Errore: tentativo di scrittura fuori dai limiti\n");
+        pthread_mutex_unlock(&my_malloc_mutex);
+        return 0;
+    }
+
+    memcpy((char*)node->ptr + offset, data, data_size);
+
+    pthread_mutex_unlock(&my_malloc_mutex);
+    return 1;
+}
+
+//funzione che legge dal blocco di memoria di grande dimensioni
+int my_read_large_alloc(void* ptr, size_t offset, void* buffer, size_t buffer_size){
+    if (ptr == NULL || buffer == NULL || buffer_size == 0){
+        fprintf(stderr, "Errore: parametri non validi\n");
+        return 0;
+    }
+
+    pthread_mutex_lock(&my_malloc_mutex);
+
+    LargeAllocInfo* node = find_large_alloc(ptr);
+    if (node == NULL){
+        fprintf(stderr, "Errore: puntatore non trovato\n");
+        pthread_mutex_unlock(&my_malloc_mutex);
+        return 0;
+    }
+
+    if (offset + buffer_size > node->size){
+        fprintf(stderr, "Errore: tentativo di lettura fuori dai limiti\n");
+        pthread_mutex_unlock(&my_malloc_mutex);
+        return 0;
+    }
+
+    memcpy(buffer, (char*)node->ptr + offset, buffer_size);
+    pthread_mutex_unlock(&my_malloc_mutex);
+    return 1;
+    
+}
+
+// funzione che scrive sul pool del buddy allocator
+int my_write_buddy_alloc(void* ptr, const char* data, size_t size){
+    if (buddy_pool_start == NULL || ptr == NULL || data == NULL || size == 0) return 0;
+    
+    char* original_alloc_ptr = (char*)ptr - sizeof(size_t);
+    pthread_mutex_lock(&my_malloc_mutex);
+    if (buddy_pool_start != NULL && original_alloc_ptr >= buddy_pool_start && original_alloc_ptr < buddy_pool_start + BUDDY_POOL_SIZE){
+
+        size_t total_allocated_size = *(size_t*)original_alloc_ptr;
+        size_t data_size = total_allocated_size - sizeof(size_t);
+        if (size > data_size){
+            size = data_size;
+        }
+        memcpy(ptr, data, size);
+    } else {
+        memcpy(ptr, data, size);
+    }
+
+    pthread_mutex_unlock(&my_malloc_mutex);
+    return 1;
+}
+
+//funzione che legge dal pool del buddy allocator
+int my_read_buddy_alloc(void* ptr, char* buffer, size_t size){
+    if (buddy_pool_start == NULL) return 0;
+
+
+    char* original_alloc_ptr = (char*)ptr - sizeof(size_t);
+    pthread_mutex_lock(&my_malloc_mutex);
+    if (buddy_pool_start != NULL && original_alloc_ptr >= buddy_pool_start && original_alloc_ptr < buddy_pool_start + BUDDY_POOL_SIZE){
+
+        size_t total_allocated_size = *(size_t*)original_alloc_ptr;
+        size_t data_size = total_allocated_size - sizeof(size_t);
+        if (size > data_size){
+            size = data_size;
+        }
+        memcpy(buffer, ptr, size);
+    } else {
+        memcpy(buffer, ptr, size);
+    }
+    pthread_mutex_unlock(&my_malloc_mutex);
+    return 1;
+}
+

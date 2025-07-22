@@ -32,9 +32,43 @@ int main(){
     printf("   my_malloc(1)    -> %p\n", p3_min_buddy);
     printf("   my_malloc(1023) -> %p\n", p4_threshold_minus_1);
     printf("   my_malloc(1025) -> %p\n", p5_threshold_plus_1);
-    //print_large_alloc_list();
 
-    //BuddyAllocator_print_pool();
+    //tentativo di scrittura sul blocco puntato da p2
+    const char* string_test = "Prova di scrittura sulla memoria";
+    if (my_write_large_alloc(p2_large, 0, string_test, strlen(string_test) + 1)){
+        printf("scrittura riuscita\n");
+        printf("contenuto : %s\n", (char*) p2_large);
+    } else {
+        fprintf(stderr, "scrittura fallita\n");
+    }
+
+    //tentativo di lettura dal blocco puntato da p2
+    char read_string[200];
+    if (my_read_large_alloc(p2_large, 0, read_string, strlen(string_test) + 1)){
+        printf("lettura riuscita\n");
+        printf("%s\n",read_string);
+    } else {
+        fprintf(stderr, "lettura fallita\n");
+    }
+
+    //tentativo di scrittura sul pool (nel blocco puntato da p1_small)
+    const char* string_test2 = "Prova";
+    if (my_write_buddy_alloc(p1_small, string_test2, strlen(string_test2) + 1)){
+        printf("scrittura sul pool riuscita\n");
+    } else {
+        fprintf(stderr, "scrittura sul pool fallita\n");
+    }
+    //dump_pool(100); //questa funzione scrive i primi 100 bytes del pool in cui c'è scritta la parola 'prova'
+
+    //tentativo di lettura dal pool
+    char read_string2[1000];
+    if (my_read_buddy_alloc(p1_small, read_string2, strlen(read_string2) + 1)){
+        printf("lettura dal pool riuscita\n");
+        printf("%s\n", read_string2);
+    } else  {
+        fprintf(stderr, "lettura dal pool fallita\n");
+    }
+    //print_large_alloc_list();
 
     // Libera i blocchi
     my_free(p1_small);
@@ -43,7 +77,7 @@ int main(){
     my_free(p4_threshold_minus_1);
     my_free(p5_threshold_plus_1);
     printf("   Deallocazioni semplici completate.\n\n");
-    //BuddyAllocator_print_pool();
+    //print_large_alloc_list();
 
 
     // --- Test 2: Allocazione per Riempire Parzialmente il Buddy Pool ---
